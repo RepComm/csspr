@@ -3,6 +3,10 @@ export type CSSPRRule = {
   [key in KnownCSSKey]?: string;
 };
 
+export interface CSSPRRuleMap {
+  [key: string]: CSSPRRule;
+}
+
 export interface CSSPRStyleSheet {
   [key: string]: CSSPRRule;
 }
@@ -34,7 +38,7 @@ const SCAN_TYPE = {
     MODIFIER: ">",
     NAME: /[a-zA-Z]/,
     KEY: /[a-zA-Z-]/,
-    VALUE: /[a-zA-Z0-9(),]/
+    VALUE: /[a-zA-Z0-9(),%]/
   }
 }
 
@@ -87,24 +91,217 @@ export interface CSSPRRect {
   height: number;
 }
 
-export interface CSSPRElement {
+/**Check for null and undefined, and if array that has length < 1
+ * 
+ * @param v 
+ * @returns 
+ */
+export function isEmpty (v: any): boolean {
+  if (v === undefined || v === null) {
+    return true;
+  } else if (Array.isArray(v)) {
+    return v.length < 1;
+  } else {
+    return false;
+  }
+}
+export function isVoid (v: any): boolean {
+  if (v === undefined || v === null) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+export type EventArrayEventType = "set"|"get"|"push"|"pop";
+export interface EventArrayEvent<T> {
+  type: EventArrayEventType;
+  array: EventArray<T>;
+  index: number;
+  value: T;
+}
+export interface EventArrayListener<T> {
+  type?: EventArrayEventType;
+  (evt: EventArrayEvent<T>): void;
+}
+
+export class EventArray<T> {
+  internal: Array<T>;
+
+  listeners: Set<EventArrayListener<T>>;
+
+  fire (evt: EventArrayEvent<T>) {
+    for (let listener of this.listeners) {
+      if (evt.type === listener.type) {
+        listener(evt);
+      }
+    }
+  }
+  on (type: EventArrayEventType, listener: EventArrayListener<T>) {
+    listener.type = type;
+    this.listeners.add(listener);
+  }
+  off (listener: EventArrayListener<T>) {
+    this.listeners.delete(listener);
+  }
+
+  constructor () {
+    this.internal = new Array();
+
+    this.listeners = new Set();
+
+    let defineIndexProperty = (index: number)=> {
+      let _self = this;
+      if (!(index in _self)) {
+        Object.defineProperty(_self, index, {
+          configurable: true,
+          enumerable: true,
+          get: ()=> {
+            let value = this.internal[index];
+
+            this.fire({
+              type: "get",
+              index: index,
+              value: value,
+              array: this
+            });
+
+            return value;
+          },
+          set: (v: T)=> {
+            this.internal[index] = v;
+            this.fire({
+              type: "set",
+              index: index,
+              value: v,
+              array: this
+            });
+          }
+        });
+      }
+    }
+  }
+}
+
+export class CSSPRElement {
   parent?: CSSPRElement;
   children?: Array<CSSPRElement>;
+  
+  private _classList: Array<string>;
+  //this is actually a proxy wrapper around _classList
+  classList: Array<string>;
 
-  /**precedence 0*/
-  classList?: Array<string>;
-  /**precedence 1*/
-  className?: string;
-
+  classNamePrevious: string;
+  
   id?: string;
-
+  
   tagName?: KnownCSSTagName;
-
+  
   styles?: CSSPRRule;
+  
+  cachedClasses?: CSSPRRuleMap;
+  calculatedStyles?: CSSPRRule;
+
+  needsUpdate: {
+    cachedClasses: boolean;
+  }
 
   /**
    * output rect, the render result*/
   rect: CSSPRRect;
+  
+  constructor (tagName: KnownCSSTagName) {
+    this.rect = {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    };
+    this.tagName = tagName;
+    this.styles = {};
+    this.calculatedStyles = {};
+    this._classList = new Array();
+    this.classNamePrevious = "";
+
+    this.needsUpdate = {
+      cachedClasses: true
+    };
+
+    let thiz = this;
+    this.classList = new Proxy(this._classList, {
+      apply (target, thisArg, argumentsList) {
+        // @ts-expect-error
+        return thisArg[target].apply(this, argumentsList);
+      },
+      deleteProperty (target, property) {
+        thiz.needsUpdate.cachedClasses = true;
+        return true;
+      },
+      set (target, property, value, receiver) {
+        target[property] = value;
+        thiz.needsUpdate.cachedClasses = true;
+        return true;
+      }
+    });
+  }
+  hasChildren (): boolean {
+    return this.children !== undefined && this.children !== null && this.children.length > 0;
+  }
+  addChildren (...children: CSSPRElement[]): this {
+    if (isVoid(this.children)) {
+      this.children = [];
+    }
+    this.children.push(...children);
+    return this;
+  }
+  hasCachedRule (key: string): boolean {
+    return !isEmpty(this.cachedClasses[key]);
+  }
+  setCachedRule (key: string, rule: CSSPRRule) {
+    this.cachedClasses[key] = rule;
+  }
+  calculateCachedClasses () {
+    for (let key of this._classList) {
+      if (this.hasCachedRule(key)) {
+        //do nothing
+      } else {
+        let result = CSSPR.findClassName(key);
+        if (isEmpty(result)) {
+          //no class found for key
+        } else {
+          this.setCachedRule(key, result);
+        }
+      }
+    }
+    this.needsUpdate.cachedClasses = false;
+  }
+  set className (v: string) {
+    this.classNamePrevious = this.className;
+
+    let names = v.split(" ");
+    
+    this._classList.length = names.length;
+    for (let i=0; i<names.length; i++) {
+      this._classList[i] = names[i];
+    }
+    this.needsUpdate.cachedClasses = true;
+  }
+  get className (): string {
+    return this._classList.join(" ");
+  }
+  update () {
+    if (this.needsUpdate.cachedClasses) {
+      this.calculateCachedClasses();
+    }
+  }
+
+  setStyles (styles: CSSPRRule): this {
+    let keys = Object.keys(styles);
+    for (let key of keys) {
+      this.styles[key] = styles[key];
+    }
+    return this;
+  }
 }
 
 export interface CSSRPRenderCallback {
@@ -436,8 +633,19 @@ export const CSSPR = {
     to.width = from.width;
     to.height = from.height;
   },
+  findClassName (name: string): CSSPRRule {
+    let r: CSSPRRule;
+    for (let ss of CSSPR.stylesheet.all) {
+      r = ss[name];
+      if (isEmpty(ss[name])) {
+        continue;
+      } else {
+        return r;
+      }
+    }
+    return null;
+  },
   renderElementChildren (e: CSSPRElement) {
-
     let totalFlex = 0;
     for (let child of e.children) {
       if (child.styles.flex) {
@@ -453,14 +661,22 @@ export const CSSPR = {
     for (let child of e.children) {
       childFlex = parseFloat(child.styles.flex) || 1;
       if (e.styles["flex-direction"] === "column") {
+        child.rect.x = 0;
         child.rect.y = usedFlexPixels;
+
         child.rect.height = (childFlex / totalFlex) * e.rect.height;
+
         usedFlexPixels += child.rect.height;
+
         child.rect.width = e.rect.width;
       } else {
+        child.rect.y = 0;
         child.rect.x = usedFlexPixels;
+
         child.rect.width = (childFlex / totalFlex) * e.rect.width;
+
         usedFlexPixels += child.rect.width;
+
         child.rect.height = e.rect.height;
       }
       if (child.children) {
