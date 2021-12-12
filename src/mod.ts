@@ -1,7 +1,7 @@
 
-export interface CSSPRRule {
-  [key: string]: string;
-}
+export type CSSPRRule = {
+  [key in KnownCSSKey]?: string;
+};
 
 export interface CSSPRStyleSheet {
   [key: string]: CSSPRRule;
@@ -38,12 +38,14 @@ const SCAN_TYPE = {
   }
 }
 
-export type KnownCSSKeys = (
+export type KnownCSSKey = (
   "background" |
   "background-color" |
   "border" |
 
   "color" |
+
+  "display" |
 
   "flex" |
   "flex-basis" |
@@ -63,6 +65,98 @@ export type KnownCSSKeys = (
   "width" |
   "height"
 );
+
+export type KnownCSSTagName = (
+  "A"|
+  "BODY"|
+  "BUTTON"|
+  "CANVAS"|
+  "DIV"|
+  "HEAD"|
+  "IFRAME"|
+  "INPUT"|
+  "SCRIPT"|
+
+  ""
+);
+
+export interface CSSPRRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface CSSPRElement {
+  parent?: CSSPRElement;
+  children?: Array<CSSPRElement>;
+
+  /**precedence 0*/
+  classList?: Array<string>;
+  /**precedence 1*/
+  className?: string;
+
+  id?: string;
+
+  tagName?: KnownCSSTagName;
+
+  styles?: CSSPRRule;
+
+  /**
+   * output rect, the render result*/
+  rect: CSSPRRect;
+}
+
+export interface CSSRPRenderCallback {
+  (element: CSSPRElement, rect: CSSPRRect): void;
+}
+
+export interface CSSPRInvalidRecursionCallback {
+  (offender: CSSPRRect): void;
+}
+
+export interface RenderOptions {
+  /**
+   * For each element, the output rect can be stored on the element 'rect' field, sent to callback, or both.
+   * 
+   * callback is only fired when it is provided
+   * properties are only set when outputRectProperty is true
+   * 
+   * if neither is selected, an exception is thrown since you probably didn't want to render for nothing
+   */
+  outputRectProperty?: boolean;
+  callback?: CSSRPRenderCallback;
+
+  /**The root element to iterate down
+   * Does not have to be the document.body
+   * 
+   * Useful when you only need to re-render a portion of the DOM
+   */
+  root: CSSPRElement;
+
+  /**Max width and height of root element*/
+  bounds: CSSPRRect;
+
+  invalidRecursion?: {
+    /**what to do if there is an invalid tree recursion loop
+     * 
+     * this happens when a child is also its own ancestor Alabama style (this literally isn't possible, stfu and don't virtue signal me)
+     * 
+     * ignore - NOT suggested. Infinite loops.. everywhere
+     * 
+     * throw - logically consistent, kind of annoying sometimes
+     * prune - auto-remove younger child and use as ancestor instead (cheap and functional)
+     */
+    method?: "ignore" | "throw" | "prune";
+    callback?: CSSPRInvalidRecursionCallback;
+  };
+
+  /**
+   * CSS rules are cached to save render time
+   * set this value to true if element id, className, classList, or tree relationships change
+   */
+  appliedStylesNeedUpdate?: boolean;
+}
 
 export const CSSPR = {
   scan: {
@@ -211,7 +305,7 @@ export const CSSPR = {
 
         let ruleAttempts = 0;
         let ruleMaxAttempts = 512;
-        while (ruleAttempts < ruleMaxAttempts && state.offset < state.src.length-1) {
+        while (ruleAttempts < ruleMaxAttempts && state.offset < state.src.length - 1) {
 
           CSSPR.scan.whitespace(state, out);
           CSSPR.scan.update_state(state, out);
@@ -326,6 +420,63 @@ export const CSSPR = {
       }
       _resolve(result);
       return;
+    });
+  },
+  cloneRect(r: CSSPRRect): CSSPRRect {
+    return {
+      width: r.width,
+      height: r.height,
+      x: r.x,
+      y: r.y
+    };
+  },
+  copyRect(from: CSSPRRect, to: CSSPRRect) {
+    to.x = from.x;
+    to.y = from.y;
+    to.width = from.width;
+    to.height = from.height;
+  },
+  renderElementChildren (e: CSSPRElement) {
+
+    let totalFlex = 0;
+    for (let child of e.children) {
+      if (child.styles.flex) {
+        totalFlex += parseFloat(child.styles.flex);
+      } else {
+        totalFlex += 1;
+      }
+    }
+
+    let childFlex = 0;
+    let usedFlexPixels = 0;
+
+    for (let child of e.children) {
+      childFlex = parseFloat(child.styles.flex) || 1;
+      if (e.styles["flex-direction"] === "column") {
+        child.rect.y = usedFlexPixels;
+        child.rect.height = (childFlex / totalFlex) * e.rect.height;
+        usedFlexPixels += child.rect.height;
+        child.rect.width = e.rect.width;
+      } else {
+        child.rect.x = usedFlexPixels;
+        child.rect.width = (childFlex / totalFlex) * e.rect.width;
+        usedFlexPixels += child.rect.width;
+        child.rect.height = e.rect.height;
+      }
+      if (child.children) {
+        CSSPR.renderElementChildren(child);
+      }
+    }
+  },
+  render(options: RenderOptions): Promise<void> {
+    return new Promise(async (_resolve, _reject) => {
+      CSSPR.copyRect(options.bounds, options.root.rect);
+
+      if (options.root.children) {
+        CSSPR.renderElementChildren(options.root);
+      }
+
+      _resolve();
     });
   }
 };

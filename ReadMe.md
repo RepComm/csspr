@@ -11,6 +11,8 @@ A demo can be found at index.html and index.ts
 
 The code is imported from mod.js, which can be required from node_modules even within browser (see index.ts for example)
 
+![img](./example.png)
+
 ## State
 - Lex CSS into JS objects
 ## Target State
