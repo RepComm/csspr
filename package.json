@@ -1,11 +1,11 @@
 {
-  "name": "ts-esm-babel-template",
+  "name": "@repcomm/csspr",
   "version": "1.0.0",
-  "description": "Babel template for compiling ts to esm",
+  "description": "CSS Pseudo Renderer",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RepComm/ts-esm-babel-template.git"
+    "url": "git+https://github.com/RepComm/csspr.git"
   },
   "keywords": [
     "typescript",
@@ -16,16 +16,17 @@
   "author": "Jonathan Crowder",
   "license": "Unlicense",
   "bugs": {
-    "url": "https://github.com/RepComm/ts-esm-babel-template/issues"
+    "url": "https://github.com/RepComm/csspr/issues"
   },
-  "homepage": "https://github.com/RepComm/ts-esm-babel-template#readme",
+  "homepage": "https://github.com/RepComm/csspr#readme",
   "devDependencies": {
     "@babel/cli": "^7.13.16",
     "@babel/core": "^7.14.0",
     "@babel/plugin-transform-typescript": "^7.10.5",
-    "@babel/preset-env": "^7.14.1"
+    "@babel/preset-env": "^7.14.1",
+    "@repcomm/exponent-ts": "^1.1.9"
   },
   "scripts": {
-    "build": "babel src --extensions .ts --copy-files -d lib"
+    "build": "babel src --extensions .ts --copy-files -d ."
   }
 }
